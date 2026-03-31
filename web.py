@@ -266,6 +266,13 @@ def main():
     st.set_page_config(page_title="Anim Metrics Analyzer", layout="wide")
     st.title("Anim Metrics Analyzer")
 
+    # Wider sidebar
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { min-width: 420px; }
+    </style>
+    """, unsafe_allow_html=True)
+
     # --- Sidebar: Upload & Filters ---
     with st.sidebar:
         st.header("Input")
@@ -279,16 +286,15 @@ def main():
         csv_data = {}
         for f in uploaded_files:
             csv_data[f.name] = pd.read_csv(f)
-        st.success(f"Loaded {len(csv_data)} file(s)")
 
         file_names = list(csv_data.keys())
 
-        # Selection mode
+        # File selection checkboxes (only when multiple files)
+        selected = []
         if len(file_names) == 1:
             selected = file_names
         else:
-            st.markdown("Select files to analyze (pick 1 or 2 to compare)")
-            selected = []
+            st.caption("Select 1 or 2 files to compare")
             for fn in file_names:
                 if st.checkbox(fn, value=(fn == file_names[0]), key=f"sel_{fn}"):
                     selected.append(fn)
