@@ -1,0 +1,24 @@
+EA Anim Sequence Analyzer (All Sequences)
+
+What it does
+- Loads a CSV file containing at minimum: playerID, sequence, gameTick
+- For each unique value in 'sequence', computes:
+  - play_times_rows: total number of rows where that sequence appears
+  - run_count: number of contiguous runs across all players
+  - duration_ticks_min/max/avg across runs
+- A "run" is a contiguous block where, for a given playerID, consecutive rows (sorted by gameTick)
+  have the same sequence.
+- Duration is computed as: duration_ticks = endTick - startTick
+  (If you need inclusive duration: endTick - startTick + 1, tell me and I can adjust.)
+
+How to run (VS Code)
+1) Open this folder in VS Code
+2) (Recommended) Create a venv
+3) Install deps:
+   pip install -r requirements.txt
+4) Run:
+   python app.py
+
+Output
+- Saved in the same directory as the input CSV:
+  <input_name>_analyzed.csv
