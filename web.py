@@ -135,45 +135,9 @@ def build_sequence(runs: pd.DataFrame, seq_name: str) -> pd.DataFrame:
     return result
 
 
-LIGHT_CSS = """
-<style>
-    [data-testid="stAppViewContainer"], [data-testid="stHeader"],
-    [data-testid="stToolbar"], [data-testid="stBottom"],
-    [data-testid="stMainBlockContainer"], .main, .block-container {
-        background-color: #ffffff !important;
-        color: #000000 !important;
-    }
-    [data-testid="stSidebar"], [data-testid="stSidebarContent"] {
-        background-color: #f0f2f6 !important;
-        color: #000000 !important;
-    }
-    h1, h2, h3, h4, h5, h6, p, span, label, div, li,
-    [data-testid="stMarkdownContainer"], [data-testid="stText"],
-    .stRadio label, .stCheckbox label, .stSelectbox label,
-    [data-testid="stWidgetLabel"], [data-testid="stCaption"] {
-        color: #000000 !important;
-    }
-    [data-testid="stDataFrame"] { background-color: #ffffff !important; }
-    .stTabs [data-baseweb="tab"] { color: #000000 !important; }
-    input, textarea, select, [data-baseweb="select"] span,
-    [data-baseweb="input"] input { color: #000000 !important; }
-</style>
-"""
-
-
 def main():
     st.set_page_config(page_title="Anim Metrics Analyzer", layout="wide")
-
-    # Theme toggle in top-right area
-    col_title, col_toggle = st.columns([6, 1])
-    with col_title:
-        st.title("Anim Metrics Analyzer")
-    with col_toggle:
-        st.write("")
-        light_mode = st.toggle("☀️ Light", value=False)
-
-    if light_mode:
-        st.markdown(LIGHT_CSS, unsafe_allow_html=True)
+    st.title("Anim Metrics Analyzer")
 
     # --- Sidebar: Upload & Filters ---
     with st.sidebar:
