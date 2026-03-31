@@ -289,18 +289,16 @@ def main():
 
         file_names = list(csv_data.keys())
 
-        # File selection checkboxes (only when multiple files)
+        # File selection checkboxes
         selected = []
-        if len(file_names) == 1:
-            selected = file_names
-        else:
+        if len(file_names) >= 2:
             st.caption("Select 1 or 2 files to compare")
-            for fn in file_names:
-                if st.checkbox(fn, value=(fn == file_names[0]), key=f"sel_{fn}"):
-                    selected.append(fn)
-            if len(selected) > 2:
-                st.warning("Select at most 2 files.")
-                st.stop()
+        for fn in file_names:
+            if st.checkbox(fn, value=True, key=f"sel_{fn}"):
+                selected.append(fn)
+        if len(selected) > 2:
+            st.warning("Select at most 2 files.")
+            st.stop()
 
         if not selected:
             st.warning("Select at least one file.")
