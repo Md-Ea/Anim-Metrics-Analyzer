@@ -141,24 +141,6 @@ def main():
 
     # --- Sidebar: Upload & Filters ---
     with st.sidebar:
-        theme = st.toggle("Dark Theme", value=True)
-        if theme:
-            st.markdown(
-                '<style>'
-                ':root { color-scheme: dark; }'
-                '</style>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<style>'
-                ':root { color-scheme: light; }'
-                '[data-testid="stAppViewContainer"], [data-testid="stSidebar"], [data-testid="stHeader"] '
-                '{ background-color: #ffffff; color: #000000; }'
-                '</style>',
-                unsafe_allow_html=True,
-            )
-
         st.header("Input")
         uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
