@@ -266,10 +266,12 @@ def main():
     st.set_page_config(page_title="Anim Metrics Analyzer", layout="wide")
     st.title("Anim Metrics Analyzer")
 
-    # Wider sidebar
+    # Wider sidebar + reduce top padding
     st.markdown("""
     <style>
     [data-testid="stSidebar"] { min-width: 420px; }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1rem; }
+    .block-container { padding-top: 1rem; }
     </style>
     """, unsafe_allow_html=True)
 
