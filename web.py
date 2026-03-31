@@ -143,8 +143,8 @@ def _colored_html_table(df_a: pd.DataFrame, df_b: pd.DataFrame, key_cols: list, 
 
     rows_html = []
     # Header - mark key cols for sorting
-    header = "".join(f"<th style='padding:6px 12px;border-bottom:2px solid #555;text-align:left;cursor:pointer;' data-keycol='true'>{c}</th>" for c in key_cols)
-    header += "".join(f"<th style='padding:6px 12px;border-bottom:2px solid #555;text-align:right;cursor:pointer;' data-keycol='false'>{c}</th>" for c in value_cols)
+    header = "".join(f"<th data-keycol='true'>{c}</th>" for c in key_cols)
+    header += "".join(f"<th class='val-col' data-keycol='false'>{c}</th>" for c in value_cols)
     rows_html.append(f"<tr>{header}</tr>")
 
     # Store data attributes for sorting
@@ -152,7 +152,7 @@ def _colored_html_table(df_a: pd.DataFrame, df_b: pd.DataFrame, key_cols: list, 
         cells = ""
         for kc in key_cols:
             val = html_mod.escape(str(row[kc]))
-            cells += f"<td style='padding:6px 12px;border-bottom:1px solid #333;' data-text='{val}'>{val}</td>"
+            cells += f"<td data-text='{val}'>{val}</td>"
         for vc in value_cols:
             va = row.get(f"{vc}_A", 0)
             vb = row.get(f"{vc}_B", 0)
@@ -161,28 +161,38 @@ def _colored_html_table(df_a: pd.DataFrame, df_b: pd.DataFrame, key_cols: list, 
             vb_s = f"{vb:.3f}" if isinstance(vb, float) and vb != int(vb) else str(int(vb)) if vb == int(vb) else str(vb)
             va_num = float(va) if va else 0
             vb_num = float(vb) if vb else 0
-            cells += (f"<td style='padding:6px 12px;border-bottom:1px solid #333;text-align:right;' "
+            cells += (f"<td class='val-col' "
                       f"data-blue='{va_num}' data-red='{vb_num}'>"
-                      f"<span style='color:#4A90D9;font-weight:bold;'>{va_s}</span>"
+                      f"<span class='blue'>{va_s}</span>"
                       f" / "
-                      f"<span style='color:#D94A4A;font-weight:bold;'>{vb_s}</span></td>")
+                      f"<span class='red'>{vb_s}</span></td>")
         rows_html.append(f"<tr>{cells}</tr>")
 
     row_count = len(rows_html) - 1
-    height = min(max(row_count * 32 + 60, 200), 700)
+    height = min(max(row_count * 35 + 80, 200), 700)
 
     full_html = f"""<!DOCTYPE html>
 <html><head><style>
-  body {{ font-family: sans-serif; margin: 0; padding: 0; background: transparent; color: #fff; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
-  th {{ padding: 6px 12px; border-bottom: 2px solid #555; cursor: pointer; user-select: none; }}
-  th:hover {{ background: #333; }}
-  td {{ padding: 6px 12px; border-bottom: 1px solid #333; }}
+  body {{ font-family: "Source Sans Pro", sans-serif; margin: 0; padding: 0; background: transparent; color: #31333F; font-size: 14px; }}
+  .table-wrap {{ border: 1px solid #e6e9ef; border-radius: 8px; overflow: hidden; }}
+  table {{ border-collapse: collapse; width: 100%; }}
+  th {{ padding: 8px 16px; text-align: left; font-size: 12px; font-weight: 600; color: #555; text-transform: uppercase; letter-spacing: .4px;
+        background: #f0f2f6; border-bottom: 1px solid #e6e9ef; cursor: pointer; user-select: none; white-space: nowrap; }}
+  th.val-col {{ text-align: right; }}
+  th:hover {{ background: #e1e4eb; }}
+  td {{ padding: 8px 16px; border-bottom: 1px solid #e6e9ef; }}
+  td.val-col {{ text-align: right; }}
+  tr:last-child td {{ border-bottom: none; }}
+  tr:hover td {{ background: #f7f8fc; }}
+  .blue {{ color: #1f77b4; font-weight: 600; }}
+  .red {{ color: #d62728; font-weight: 600; }}
 </style></head><body>
+<div class="table-wrap">
 <table id="sortable">
   <thead>{''.join(rows_html[:1])}</thead>
   <tbody>{''.join(rows_html[1:])}</tbody>
 </table>
+</div>
 <script>
 (function() {{
   var table = document.getElementById('sortable');
@@ -192,7 +202,7 @@ def _colored_html_table(df_a: pd.DataFrame, df_b: pd.DataFrame, key_cols: list, 
       var isKey = th.getAttribute('data-keycol') === 'true';
       var rows = Array.from(table.querySelectorAll('tbody tr'));
       var state = parseInt(th.dataset.sortState || '-1');
-      headers.forEach(function(h) {{ h.dataset.sortState = '-1'; h.style.textDecoration = 'none'; h.style.color = ''; }});
+      headers.forEach(function(h) {{ h.dataset.sortState = '-1'; h.style.color = ''; }});
       if (isKey) {{
         state = (state + 1) % 2;
         th.dataset.sortState = state;
@@ -216,8 +226,7 @@ def _colored_html_table(df_a: pd.DataFrame, df_b: pd.DataFrame, key_cols: list, 
           return aR - bR;
         }});
       }}
-      if (!isKey) {{ th.style.color = (state <= 1) ? '#4A90D9' : '#D94A4A'; }}
-      th.style.textDecoration = 'underline';
+      if (!isKey) {{ th.style.color = (state <= 1) ? '#1f77b4' : '#d62728'; }}
       var tbody = table.querySelector('tbody');
       rows.forEach(function(r) {{ tbody.appendChild(r); }});
     }});
@@ -243,6 +252,14 @@ def compare_database(runs_a, runs_b, name_a, name_b, db_filter=""):
     key_cols = ["ptmDatabase", "sequence"]
     value_cols = ["sequence_count", "duration_ticks_avg", "database_count"]
     return _colored_html_table(db_a, db_b, key_cols, value_cols, name_a, name_b)
+
+
+def compare_sequence(runs_a, runs_b, name_a, name_b, seq_name):
+    seq_a = build_sequence(runs_a, seq_name)
+    seq_b = build_sequence(runs_b, seq_name)
+    key_cols = ["sequence", "ptmDatabase"]
+    value_cols = ["sequence_count", "duration_ticks_min", "duration_ticks_max", "duration_ticks_avg", "tick_duration"]
+    return _colored_html_table(seq_a, seq_b, key_cols, value_cols, name_a, name_b)
 
 
 def main():
@@ -395,6 +412,7 @@ def main():
         tab_names = ["General Comparison", f"{name_a}", f"{name_b}"]
         if has_ptm_both:
             tab_names.append("Database Comparison")
+            tab_names.append("Sequence Comparison")
         tabs = st.tabs(tab_names)
 
         with tabs[0]:
@@ -420,6 +438,18 @@ def main():
                     components.html(html_table, height=h, scrolling=True)
                 except RuntimeError as e:
                     st.error(str(e))
+
+            with tabs[4]:
+                st.subheader(f"Sequence Comparison{f' — {seq_filter}' if seq_filter else ''}")
+                if seq_filter:
+                    st.markdown(f"Legend: <span style='color:#4A90D9;font-weight:bold;'>{name_a}</span> / <span style='color:#D94A4A;font-weight:bold;'>{name_b}</span>", unsafe_allow_html=True)
+                    try:
+                        html_table, h = compare_sequence(runs_a, runs_b, label_a, label_b, seq_filter)
+                        components.html(html_table, height=h, scrolling=True)
+                    except RuntimeError as e:
+                        st.error(str(e))
+                else:
+                    st.info("Select a specific sequence in the sidebar to see its database breakdown comparison.")
 
     # Processing logs at the bottom
     all_log_items = [(n, l) for n, l in all_logs.items() if l]
