@@ -265,13 +265,14 @@ def compare_sequence(runs_a, runs_b, name_a, name_b, seq_name):
 def main():
     st.set_page_config(page_title="Anim Metrics Analyzer", layout="wide")
 
-    # Wider sidebar + smaller sidebar fonts
+    # Wider sidebar + compact fonts
     st.markdown("""
     <style>
-    [data-testid="stSidebar"] { min-width: 420px; font-size: 13px; }
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { font-size: 16px; }
-    [data-testid="stSidebar"] label { font-size: 13px; }
-    [data-testid="stSidebar"] .stCaption { font-size: 11px; }
+    [data-testid="stSidebar"] { min-width: 420px; }
+    [data-testid="stSidebar"] * { font-size: 14px !important; }
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { font-size: 17px !important; margin-top: 0.5rem !important; margin-bottom: 0.3rem !important; }
+    [data-testid="stSidebar"] .stRadio > div { display: flex; flex-wrap: wrap; gap: 0px 12px; }
+    [data-testid="stSidebar"] .stRadio > div > label { white-space: nowrap; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -311,7 +312,7 @@ def main():
         # Use first selected file for filter options
         df_raw = csv_data[selected[0]]
 
-        filter_mode = st.radio("Include", ["Everyone", "All Players", "Player Position", "Player Role", "Player ID"], index=1)
+        filter_mode = st.radio("Include", ["Everyone", "All Players", "Player Position", "Player Role", "Player ID"], index=1, horizontal=True)
 
         positions = None
         player_id = None
