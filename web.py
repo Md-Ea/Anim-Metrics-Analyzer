@@ -264,12 +264,14 @@ def compare_sequence(runs_a, runs_b, name_a, name_b, seq_name):
 
 def main():
     st.set_page_config(page_title="Anim Metrics Analyzer", layout="wide")
-    st.title("Anim Metrics Analyzer")
 
-    # Wider sidebar
+    # Wider sidebar + smaller sidebar fonts
     st.markdown("""
     <style>
-    [data-testid="stSidebar"] { min-width: 420px; }
+    [data-testid="stSidebar"] { min-width: 420px; font-size: 13px; }
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { font-size: 16px; }
+    [data-testid="stSidebar"] label { font-size: 13px; }
+    [data-testid="stSidebar"] .stCaption { font-size: 11px; }
     </style>
     """, unsafe_allow_html=True)
 
