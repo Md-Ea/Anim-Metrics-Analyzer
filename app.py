@@ -6,8 +6,9 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QFileDialog, QMessageBox, QCheckBox,
     QRadioButton, QSpinBox, QTextEdit, QButtonGroup, QCompleter, QComboBox,
+    QSplitter, QTabWidget, QTableView, QHeaderView, QGroupBox,
 )
-from PySide6.QtCore import Qt, QSettings, QStringListModel
+from PySide6.QtCore import Qt, QSettings, QStringListModel, QAbstractTableModel
 
 REQUIRED_COLUMNS = ["playerID", "sequence", "gameTick"]
 
@@ -133,12 +134,18 @@ def analyze_all_sequences(csv_path: str, threshold: int = 2, positions: list = N
     seq_summary = (runs.groupby("sequence", as_index=False)
                      .agg(
                          run_count=("run_id", "count"),
-                         play_times_rows=("play_times_rows", "sum"),
                          duration_ticks_min=("duration_ticks", "min"),
                          duration_ticks_max=("duration_ticks", "max"),
                          duration_ticks_avg=("duration_ticks", "mean"),
                      ))
     seq_summary["duration_ticks_avg"] = seq_summary["duration_ticks_avg"].round(3)
+    seq_summary = seq_summary.rename(columns={
+        "sequence": "Sequence",
+        "run_count": "Count",
+        "duration_ticks_min": "Duration Min",
+        "duration_ticks_max": "Duration Max",
+        "duration_ticks_avg": "Duration Average",
+    })
 
     out_path = os.path.join(in_dir, f"{base}_general.csv")
     log_fn(f"Saving general CSV: {out_path}")
@@ -169,13 +176,20 @@ def analyze_database(csv_path: str, threshold: int = 2, positions: list = None, 
         duration_ticks_avg=("duration_ticks", "mean"))
     seq_counts["duration_ticks_avg"] = seq_counts["duration_ticks_avg"].round(3)
 
-    # Count how many unique sequences each database has
-    db_counts = seq_counts.groupby("ptmDatabase", as_index=False).agg(database_count=("sequence", "count"))
+    # Count total runs per database
+    db_counts = runs.groupby("ptmDatabase", as_index=False).agg(database_count=("run_id", "count"))
 
     # Merge database count back
     db_seq = seq_counts.merge(db_counts, on="ptmDatabase")
     db_seq = db_seq.sort_values(["database_count", "ptmDatabase", "sequence"],
                                 ascending=[False, True, True]).reset_index(drop=True)
+    db_seq = db_seq.rename(columns={
+        "ptmDatabase": "Database",
+        "sequence": "Sequence",
+        "sequence_count": "Sequence Count",
+        "duration_ticks_avg": "Duration Average",
+        "database_count": "Database Count",
+    })
 
     out_path = os.path.join(in_dir, f"{base}_database.csv")
     log_fn(f"Saving database CSV: {out_path}")
@@ -204,6 +218,15 @@ def analyze_sequence(csv_path: str, seq_name: str, threshold: int = 2, positions
                    tick_duration=("duration_ticks", "sum")))
     result["duration_ticks_avg"] = result["duration_ticks_avg"].round(3)
     result = result.sort_values("tick_duration", ascending=False).reset_index(drop=True)
+    result = result.rename(columns={
+        "sequence": "Sequence",
+        "ptmDatabase": "Database",
+        "sequence_count": "Sequence Count",
+        "duration_ticks_min": "Duration Min",
+        "duration_ticks_max": "Duration Max",
+        "duration_ticks_avg": "Duration Average",
+        "tick_duration": "Total Duration",
+    })
 
     out_path = os.path.join(in_dir, f"{base}_sequence.csv")
     log_fn(f"Saving sequence CSV: {out_path}")
@@ -212,42 +235,259 @@ def analyze_sequence(csv_path: str, seq_name: str, threshold: int = 2, positions
     return out_path
 
 
+def analyze_timeline(csv_path: str, player_id: int, threshold: int = 2, positions: list = None, log_fn=print) -> str:
+    """Produces a _timeline.csv: chronological sequence list for a specific player."""
+    df, runs, has_ptm, base, in_dir = _load_and_clean(csv_path, threshold, positions, player_id, log_fn)
+
+    log_fn(f"Building timeline for player {player_id}...")
+    timeline = runs.sort_values("startTick").reset_index(drop=True)
+    timeline["order"] = range(1, len(timeline) + 1)
+    timeline["game_time"] = timeline["startTick"]
+    cols = ["order", "sequence"]
+    if has_ptm:
+        cols.append("ptmDatabase")
+    cols += ["startTick", "endTick", "duration_ticks", "game_time"]
+    result = timeline[cols].copy()
+    result = result.rename(columns={
+        "order": "Order",
+        "sequence": "Sequence",
+        "ptmDatabase": "Database",
+        "startTick": "Start Tick",
+        "endTick": "End Tick",
+        "duration_ticks": "Duration (Ticks)",
+        "game_time": "Game Time (Ticks)",
+    })
+
+    out_path = os.path.join(in_dir, f"{base}_timeline.csv")
+    log_fn(f"Saving timeline CSV: {out_path}")
+    result.to_csv(out_path, index=False)
+    log_fn(f"Done. {len(result)} sequences in chronological order.")
+    return out_path
+
+
+# --- Build functions for in-app tables (matching web.py) ---
+
+def build_general(runs):
+    result = (runs.groupby("sequence", as_index=False)
+              .agg(run_count=("run_id", "count"),
+                   duration_ticks_min=("duration_ticks", "min"),
+                   duration_ticks_max=("duration_ticks", "max"),
+                   duration_ticks_avg=("duration_ticks", "mean")))
+    result["duration_ticks_avg"] = result["duration_ticks_avg"].round(3)
+    return result.rename(columns={
+        "sequence": "Sequence", "run_count": "Count",
+        "duration_ticks_min": "Duration Min", "duration_ticks_max": "Duration Max",
+        "duration_ticks_avg": "Duration Average",
+    })
+
+
+def build_database(runs, db_filter=""):
+    if "ptmDatabase" not in runs.columns:
+        raise RuntimeError("'ptmDatabase' column not found.")
+    if db_filter:
+        runs = runs[runs["ptmDatabase"] == db_filter]
+        if runs.empty:
+            raise RuntimeError(f"No runs found for database '{db_filter}'.")
+    seq_counts = runs.groupby(["ptmDatabase", "sequence"], as_index=False).agg(
+        sequence_count=("run_id", "count"), duration_ticks_avg=("duration_ticks", "mean"))
+    seq_counts["duration_ticks_avg"] = seq_counts["duration_ticks_avg"].round(3)
+    db_counts = runs.groupby("ptmDatabase", as_index=False).agg(database_count=("run_id", "count"))
+    db_seq = seq_counts.merge(db_counts, on="ptmDatabase")
+    db_seq = db_seq.sort_values(["database_count", "ptmDatabase", "sequence"],
+                                ascending=[False, True, True]).reset_index(drop=True)
+    return db_seq.rename(columns={
+        "ptmDatabase": "Database", "sequence": "Sequence",
+        "sequence_count": "Sequence Count", "duration_ticks_avg": "Duration Average",
+        "database_count": "Database Count",
+    })
+
+
+def build_sequence(runs, seq_name):
+    if "ptmDatabase" not in runs.columns:
+        raise RuntimeError("'ptmDatabase' column not found.")
+    runs_seq = runs[runs["sequence"] == seq_name]
+    if runs_seq.empty:
+        raise RuntimeError(f"No runs found for sequence '{seq_name}'.")
+    result = (runs_seq.groupby(["sequence", "ptmDatabase"], as_index=False)
+              .agg(sequence_count=("run_id", "count"),
+                   duration_ticks_min=("duration_ticks", "min"),
+                   duration_ticks_max=("duration_ticks", "max"),
+                   duration_ticks_avg=("duration_ticks", "mean"),
+                   tick_duration=("duration_ticks", "sum")))
+    result["duration_ticks_avg"] = result["duration_ticks_avg"].round(3)
+    result = result.sort_values("tick_duration", ascending=False).reset_index(drop=True)
+    return result.rename(columns={
+        "sequence": "Sequence", "ptmDatabase": "Database",
+        "sequence_count": "Sequence Count", "duration_ticks_min": "Duration Min",
+        "duration_ticks_max": "Duration Max", "duration_ticks_avg": "Duration Average",
+        "tick_duration": "Total Duration",
+    })
+
+
+def build_player_timeline(runs):
+    timeline = runs.sort_values("startTick").reset_index(drop=True)
+    timeline["game_time"] = timeline["startTick"]
+    cols = ["sequence"]
+    if "ptmDatabase" in timeline.columns:
+        cols.append("ptmDatabase")
+    cols += ["startTick", "endTick", "duration_ticks", "game_time"]
+    result = timeline[cols].copy()
+    return result.rename(columns={
+        "sequence": "Sequence", "ptmDatabase": "Database",
+        "startTick": "Start Tick", "endTick": "End Tick",
+        "duration_ticks": "Duration (Ticks)", "game_time": "Game Time (Ticks)",
+    })
+
+
+class PandasModel(QAbstractTableModel):
+    """Qt table model wrapping a pandas DataFrame."""
+    def __init__(self, df=None):
+        super().__init__()
+        self._df = df if df is not None else pd.DataFrame()
+
+    def rowCount(self, parent=None):
+        return len(self._df)
+
+    def columnCount(self, parent=None):
+        return len(self._df.columns)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole:
+            val = self._df.iloc[index.row(), index.column()]
+            if isinstance(val, float):
+                return f"{val:.3f}" if val != int(val) else str(int(val))
+            return str(val)
+        if role == Qt.TextAlignmentRole:
+            val = self._df.iloc[index.row(), index.column()]
+            if isinstance(val, (int, float)):
+                return int(Qt.AlignRight | Qt.AlignVCenter)
+        return None
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole:
+            if orientation == Qt.Horizontal:
+                return str(self._df.columns[section])
+            return str(section + 1)
+        return None
+
+    def setDataFrame(self, df):
+        self.beginResetModel()
+        self._df = df
+        self.endResetModel()
+
+    def sort(self, column, order=Qt.AscendingOrder):
+        if self._df.empty:
+            return
+        col_name = self._df.columns[column]
+        ascending = order == Qt.AscendingOrder
+        self.beginResetModel()
+        self._df = self._df.sort_values(col_name, ascending=ascending).reset_index(drop=True)
+        self.endResetModel()
+
+
+def _make_table_view():
+    tv = QTableView()
+    tv.setAlternatingRowColors(True)
+    tv.setSortingEnabled(True)
+    tv.setSelectionBehavior(QTableView.SelectRows)
+    tv.horizontalHeader().setStretchLastSection(True)
+    tv.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+    tv.verticalHeader().setDefaultSectionSize(24)
+    return tv
+
+
 class App(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EA Anim Sequence Analyzer (All Sequences)")
-        self.resize(900, 560)
+        self.setWindowTitle("Anim Metrics Analyzer")
+        self.resize(1200, 700)
         self.settings = QSettings("EAAnimAnalyzer", "App")
         self._all_databases = []
         self._all_sequences = []
+        self._runs = None
+        self._has_ptm = False
 
-        layout = QVBoxLayout(self)
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
 
-        # Row 1 — Input CSV + Browse
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Input CSV:"))
+        splitter = QSplitter(Qt.Horizontal)
+        root.addWidget(splitter)
+
+        # === LEFT SIDEBAR ===
+        sidebar = QWidget()
+        sidebar.setMinimumWidth(300)
+        sb = QVBoxLayout(sidebar)
+        sb.setContentsMargins(6, 6, 6, 6)
+
+        # Input CSV
+        sb.addWidget(QLabel("<b>Input</b>"))
+        row_csv = QHBoxLayout()
         self.csv_entry = QLineEdit()
         self.csv_entry.setText(self.settings.value("last_csv_path", ""))
-        row1.addWidget(self.csv_entry, 1)
-        browse_btn = QPushButton("Browse...")
+        row_csv.addWidget(self.csv_entry, 1)
+        browse_btn = QPushButton("Browse")
         browse_btn.clicked.connect(self.browse_csv)
-        row1.addWidget(browse_btn)
-        layout.addLayout(row1)
+        row_csv.addWidget(browse_btn)
+        sb.addLayout(row_csv)
 
-        # Row 2 — Export options
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Export:"))
-        self.export_analyzed_cb = QCheckBox("General Results")
-        self.export_analyzed_cb.setChecked(True)
-        row2.addWidget(self.export_analyzed_cb)
-        row2.addStretch()
-        layout.addLayout(row2)
+        # Filters
+        sb.addWidget(QLabel("<b>Filters</b>"))
 
-        # Row 2a — Database export
-        row2a = QHBoxLayout()
-        row2a.addWidget(QLabel("Database CSV:"))
+        # Radio buttons in a flow layout
+        filter_box = QHBoxLayout()
+        self.filter_all_radio = QRadioButton("Everyone")
+        self.filter_players_radio = QRadioButton("All Players")
+        self.filter_players_radio.setChecked(True)
+        self.filter_position_radio = QRadioButton("Position")
+        self.filter_group_radio = QRadioButton("Role")
+        self.filter_playerid_radio = QRadioButton("Player ID")
+        self.pos_group = QButtonGroup(self)
+        for r in [self.filter_all_radio, self.filter_players_radio, self.filter_position_radio,
+                  self.filter_group_radio, self.filter_playerid_radio]:
+            self.pos_group.addButton(r)
+            filter_box.addWidget(r)
+        sb.addLayout(filter_box)
+
+        # Position / Role / Player ID controls
+        filter_detail = QHBoxLayout()
+        self.position_combo = QComboBox()
+        self.position_combo.addItems(POSITION_LIST)
+        self.position_combo.setEnabled(False)
+        self.filter_position_radio.toggled.connect(self.position_combo.setEnabled)
+        filter_detail.addWidget(QLabel("Pos:"))
+        filter_detail.addWidget(self.position_combo)
+        self.group_combo = QComboBox()
+        self.group_combo.addItems(list(POSITION_GROUPS.keys()))
+        self.group_combo.setEnabled(False)
+        self.filter_group_radio.toggled.connect(self.group_combo.setEnabled)
+        filter_detail.addWidget(QLabel("Role:"))
+        filter_detail.addWidget(self.group_combo)
+        self.playerid_spin = QSpinBox()
+        self.playerid_spin.setRange(0, 99)
+        self.playerid_spin.setValue(0)
+        self.playerid_spin.setFixedWidth(50)
+        self.playerid_spin.setEnabled(False)
+        self.filter_playerid_radio.toggled.connect(self.playerid_spin.setEnabled)
+        filter_detail.addWidget(QLabel("ID:"))
+        filter_detail.addWidget(self.playerid_spin)
+        filter_detail.addStretch()
+        sb.addLayout(filter_detail)
+
+        # Min Duration
+        dur_row = QHBoxLayout()
+        dur_row.addWidget(QLabel("Min Duration:"))
+        self.threshold_spin = QSpinBox()
+        self.threshold_spin.setRange(0, 999999)
+        self.threshold_spin.setValue(2)
+        dur_row.addWidget(self.threshold_spin)
+        dur_row.addStretch()
+        sb.addLayout(dur_row)
+
+        # Database filter
+        db_row = QHBoxLayout()
+        db_row.addWidget(QLabel("Database:"))
         self.db_filter_entry = QLineEdit()
-        self.db_filter_entry.setPlaceholderText("Enter database name to export (empty = skip)")
+        self.db_filter_entry.setPlaceholderText("(all)")
         self.db_filter_entry.setText(self.settings.value("last_db_filter", ""))
         self.db_completer_model = QStringListModel()
         self.db_completer = QCompleter(self.db_completer_model, self)
@@ -255,14 +495,14 @@ class App(QWidget):
         self.db_completer.setFilterMode(Qt.MatchContains)
         self.db_completer.setMaxVisibleItems(15)
         self.db_filter_entry.setCompleter(self.db_completer)
-        row2a.addWidget(self.db_filter_entry, 1)
-        layout.addLayout(row2a)
+        db_row.addWidget(self.db_filter_entry, 1)
+        sb.addLayout(db_row)
 
-        # Row 2b — Sequence export
-        row2b = QHBoxLayout()
-        row2b.addWidget(QLabel("Sequence CSV:"))
+        # Sequence filter
+        seq_row = QHBoxLayout()
+        seq_row.addWidget(QLabel("Sequence:"))
         self.seq_filter_entry = QLineEdit()
-        self.seq_filter_entry.setPlaceholderText("Enter sequence name to export (empty = skip)")
+        self.seq_filter_entry.setPlaceholderText("(all)")
         self.seq_filter_entry.setText(self.settings.value("last_seq_filter", ""))
         self.seq_completer_model = QStringListModel()
         self.seq_completer = QCompleter(self.seq_completer_model, self)
@@ -270,97 +510,95 @@ class App(QWidget):
         self.seq_completer.setFilterMode(Qt.MatchContains)
         self.seq_completer.setMaxVisibleItems(15)
         self.seq_filter_entry.setCompleter(self.seq_completer)
-        row2b.addWidget(self.seq_filter_entry, 1)
-        layout.addLayout(row2b)
+        seq_row.addWidget(self.seq_filter_entry, 1)
+        sb.addLayout(seq_row)
 
-        # Row 3 — Filter radios
-        row3 = QHBoxLayout()
-        self.filter_all_radio = QRadioButton("Everyone")
-        self.filter_players_radio = QRadioButton("All Players")
-        self.filter_players_radio.setChecked(True)
-        self.filter_position_radio = QRadioButton("Player Position")
-        self.filter_group_radio = QRadioButton("Player Role")
-        self.filter_playerid_radio = QRadioButton("Player ID")
-        self.pos_group = QButtonGroup(self)
-        self.pos_group.addButton(self.filter_all_radio)
-        self.pos_group.addButton(self.filter_players_radio)
-        self.pos_group.addButton(self.filter_position_radio)
-        self.pos_group.addButton(self.filter_group_radio)
-        self.pos_group.addButton(self.filter_playerid_radio)
-        row3.addWidget(self.filter_all_radio)
-        row3.addWidget(self.filter_players_radio)
-        row3.addWidget(self.filter_position_radio)
-        self.position_combo = QComboBox()
-        self.position_combo.addItems(POSITION_LIST)
-        self.position_combo.setEnabled(False)
-        self.filter_position_radio.toggled.connect(self.position_combo.setEnabled)
-        row3.addWidget(self.position_combo)
-        row3.addWidget(self.filter_group_radio)
-        self.group_combo = QComboBox()
-        self.group_combo.addItems(list(POSITION_GROUPS.keys()))
-        self.group_combo.setEnabled(False)
-        self.filter_group_radio.toggled.connect(self.group_combo.setEnabled)
-        row3.addWidget(self.group_combo)
-        row3.addWidget(self.filter_playerid_radio)
-        self.playerid_spin = QSpinBox()
-        self.playerid_spin.setRange(0, 99)
-        self.playerid_spin.setValue(0)
-        self.playerid_spin.setFixedWidth(50)
-        self.playerid_spin.setEnabled(False)
-        self.filter_playerid_radio.toggled.connect(self.playerid_spin.setEnabled)
-        row3.addWidget(self.playerid_spin)
-        row3.addStretch()
-        layout.addLayout(row3)
-
-        # Row 3b — Min Duration
-        row3b = QHBoxLayout()
-        row3b.addWidget(QLabel("Min Duration:"))
-        self.threshold_spin = QSpinBox()
-        self.threshold_spin.setRange(0, 999999)
-        self.threshold_spin.setValue(2)
-        row3b.addWidget(self.threshold_spin)
-        row3b.addStretch()
-        layout.addLayout(row3b)
-
-        # Row 4 — Analyze & Save button
-        row4 = QHBoxLayout()
-        row4.addStretch()
-        analyze_btn = QPushButton("Analyze && Save")
-        analyze_btn.setMinimumHeight(40)
-        analyze_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; font-size: 14px; "
-            "font-weight: bold; padding: 8px 24px; border-radius: 6px; }"
+        # Apply button
+        apply_btn = QPushButton("Apply")
+        apply_btn.setMinimumHeight(36)
+        apply_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; font-size: 13px; "
+            "font-weight: bold; padding: 6px 20px; border-radius: 5px; }"
             "QPushButton:hover { background-color: #45a049; }"
             "QPushButton:pressed { background-color: #3d8b40; }"
         )
-        analyze_btn.clicked.connect(self.run_analysis)
-        row4.addWidget(analyze_btn)
-        layout.addLayout(row4)
+        apply_btn.clicked.connect(self.apply_filters)
+        sb.addWidget(apply_btn)
 
         # Log
-        layout.addWidget(QLabel("Log:"))
+        sb.addWidget(QLabel("Log:"))
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        layout.addWidget(self.log_text, 1)
+        self.log_text.setMaximumHeight(120)
+        sb.addWidget(self.log_text)
+        sb.addStretch()
 
-        self._log("Select a CSV, then click 'Analyze & Save'.\n"
-                  "Output is saved next to the input file with suffix '_analyzed.csv'.")
+        splitter.addWidget(sidebar)
 
-        # Auto-populate completers if CSV is already set
+        # === RIGHT MAIN AREA ===
+        self.tab_widget = QTabWidget()
+        splitter.addWidget(self.tab_widget)
+
+        # Create tabs: each tab is a wrapper widget with table + status label
+        self.general_model = PandasModel()
+        self.general_table = _make_table_view()
+        self.general_table.setModel(self.general_model)
+        self.general_status = QLabel("")
+        self.tab_widget.addTab(self._make_tab(self.general_table, self.general_status), "General Results")
+
+        self.db_model = PandasModel()
+        self.db_table = _make_table_view()
+        self.db_table.setModel(self.db_model)
+        self.db_status = QLabel("")
+        self.tab_widget.addTab(self._make_tab(self.db_table, self.db_status), "Database View")
+
+        self.seq_model = PandasModel()
+        self.seq_table = _make_table_view()
+        self.seq_table.setModel(self.seq_model)
+        self.seq_status = QLabel("")
+        self.tab_widget.addTab(self._make_tab(self.seq_table, self.seq_status), "Sequence View")
+
+        self.timeline_model = PandasModel()
+        self.timeline_table = _make_table_view()
+        self.timeline_table.setModel(self.timeline_model)
+        self.timeline_status = QLabel("")
+        self.tab_widget.addTab(self._make_tab(self.timeline_table, self.timeline_status), "Timeline View")
+
+        # Set initial splitter sizes: sidebar ~400px, main area gets the rest
+        splitter.setSizes([400, 800])
+
+        # Disable all data tabs initially
+        self._set_tab_enabled(0, False, "Click Apply to load data")
+        self._set_tab_enabled(1, False, "Requires ptmDatabase column")
+        self._set_tab_enabled(2, False, "Enter a sequence name and click Apply")
+        self._set_tab_enabled(3, False, "Select Player ID filter and click Apply")
+
+        self._log("Select a CSV and click Apply to view results.")
         self._load_csv_metadata()
         self.csv_entry.textChanged.connect(self._on_csv_changed)
 
     def browse_csv(self):
         last_dir = self.settings.value("last_browse_dir", "")
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select CSV file", last_dir,
-            "CSV files (*.csv);;All files (*.*)"
-        )
+            self, "Select CSV file", last_dir, "CSV files (*.csv);;All files (*.*)")
         if path:
             self.csv_entry.setText(path)
             self.settings.setValue("last_csv_path", path)
             self.settings.setValue("last_browse_dir", os.path.dirname(path))
             self._log(f"Selected: {path}")
+
+    @staticmethod
+    def _make_tab(table, status_label):
+        w = QWidget()
+        vl = QVBoxLayout(w)
+        vl.setContentsMargins(4, 4, 4, 4)
+        vl.addWidget(table, 1)
+        vl.addWidget(status_label)
+        return w
+
+    def _set_tab_enabled(self, idx, enabled, tooltip=""):
+        self.tab_widget.setTabEnabled(idx, enabled)
+        self.tab_widget.setTabToolTip(idx, tooltip if not enabled else "")
 
     def _on_csv_changed(self, text):
         self._load_csv_metadata()
@@ -382,31 +620,11 @@ class App(QWidget):
 
     def _log(self, msg: str):
         self.log_text.append(msg)
-        scrollbar = self.log_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        sb = self.log_text.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
-    def run_analysis(self):
-        csv_path = self.csv_entry.text().strip()
-        if not csv_path:
-            QMessageBox.critical(self, "Missing CSV", "Please select an input CSV file.")
-            return
-        if not os.path.exists(csv_path):
-            QMessageBox.critical(self, "File not found", f"CSV path does not exist:\n{csv_path}")
-            return
-
-        threshold = self.threshold_spin.value()
-
-        do_analyzed = self.export_analyzed_cb.isChecked()
-        db_name = self.db_filter_entry.text().strip()
-        seq_name = self.seq_filter_entry.text().strip()
-        if not do_analyzed and not db_name and not seq_name:
-            QMessageBox.critical(self, "No export selected", "Please select at least one export option.")
-            return
-
-        filter_pos = self.filter_players_radio.isChecked()
-        player_id = self.playerid_spin.value() if self.filter_playerid_radio.isChecked() else None
-
-        # Determine positions filter
+    def _get_filter_params(self):
+        """Return (positions, player_id, threshold, db_filter, seq_filter)."""
         if self.filter_all_radio.isChecked():
             positions = None
         elif self.filter_players_radio.isChecked():
@@ -417,26 +635,90 @@ class App(QWidget):
             positions = POSITION_GROUPS[self.group_combo.currentText()]
         else:
             positions = None
+        player_id = self.playerid_spin.value() if self.filter_playerid_radio.isChecked() else None
+        threshold = self.threshold_spin.value()
+        db_filter = self.db_filter_entry.text().strip()
+        seq_filter = self.seq_filter_entry.text().strip()
+        self.settings.setValue("last_db_filter", db_filter)
+        self.settings.setValue("last_seq_filter", seq_filter)
+        return positions, player_id, threshold, db_filter, seq_filter
 
-        # Save last used values
-        self.settings.setValue("last_db_filter", db_name)
-        self.settings.setValue("last_seq_filter", seq_name)
+    def apply_filters(self):
+        csv_path = self.csv_entry.text().strip()
+        if not csv_path or not os.path.exists(csv_path):
+            QMessageBox.critical(self, "Missing CSV", "Please select a valid input CSV file.")
+            return
 
-        results = []
+        positions, player_id, threshold, db_filter, seq_filter = self._get_filter_params()
+
         try:
-            if do_analyzed:
-                out = analyze_all_sequences(csv_path, threshold=threshold, positions=positions, player_id=player_id, log_fn=self._log)
-                results.append(out)
-            if db_name:
-                out = analyze_database(csv_path, threshold=threshold, positions=positions, player_id=player_id, db_filter=db_name, log_fn=self._log)
-                results.append(out)
-            if seq_name:
-                out = analyze_sequence(csv_path, seq_name=seq_name, threshold=threshold, positions=positions, player_id=player_id, log_fn=self._log)
-                results.append(out)
-            QMessageBox.information(self, "Success", "Saved:\n" + "\n".join(results))
-        except Exception as e:
+            _df, runs, has_ptm, _base, _in_dir = _load_and_clean(
+                csv_path, threshold, positions, player_id, self._log)
+            self._runs = runs
+            self._has_ptm = has_ptm
+        except RuntimeError as e:
             self._log(f"ERROR: {e}")
-            QMessageBox.critical(self, "Analysis failed", str(e))
+            QMessageBox.critical(self, "Load failed", str(e))
+            return
+
+        # General Results
+        try:
+            gen_df = build_general(runs)
+            self.general_model.setDataFrame(gen_df)
+            self.general_status.setText(f"{len(gen_df)} sequences")
+            self._set_tab_enabled(0, True)
+            self.tab_widget.setCurrentIndex(0)
+        except Exception as e:
+            self.general_status.setText(f"Error: {e}")
+            self._set_tab_enabled(0, False, "Error loading data")
+
+        # Database View
+        if has_ptm:
+            try:
+                db_df = build_database(runs, db_filter)
+                self.db_model.setDataFrame(db_df)
+                self.db_status.setText(f"{len(db_df)} rows")
+                self._set_tab_enabled(1, True)
+            except RuntimeError as e:
+                self.db_model.setDataFrame(pd.DataFrame())
+                self.db_status.setText(f"Error: {e}")
+                self._set_tab_enabled(1, False, str(e))
+        else:
+            self.db_model.setDataFrame(pd.DataFrame())
+            self.db_status.setText("No ptmDatabase column found.")
+            self._set_tab_enabled(1, False, "Requires ptmDatabase column in CSV")
+
+        # Sequence View
+        if has_ptm and seq_filter:
+            try:
+                seq_df = build_sequence(runs, seq_filter)
+                self.seq_model.setDataFrame(seq_df)
+                self.seq_status.setText(f"{len(seq_df)} databases")
+                self._set_tab_enabled(2, True)
+            except RuntimeError as e:
+                self.seq_model.setDataFrame(pd.DataFrame())
+                self.seq_status.setText(f"Error: {e}")
+                self._set_tab_enabled(2, False, str(e))
+        else:
+            self.seq_model.setDataFrame(pd.DataFrame())
+            self._set_tab_enabled(2, False, "Enter a sequence name in the sidebar and click Apply")
+
+        # Timeline View
+        if player_id is not None:
+            try:
+                tl_df = build_player_timeline(runs)
+                self.timeline_model.setDataFrame(tl_df)
+                self.timeline_status.setText(f"{len(tl_df)} sequences in chronological order")
+                self._set_tab_enabled(3, True)
+            except Exception as e:
+                self.timeline_model.setDataFrame(pd.DataFrame())
+                self.timeline_status.setText(f"Error: {e}")
+                self._set_tab_enabled(3, False, str(e))
+        else:
+            self.timeline_model.setDataFrame(pd.DataFrame())
+            self._set_tab_enabled(3, False, "Select Player ID filter and click Apply")
+
+        self._log("Tables updated.")
 
 
 def main():
