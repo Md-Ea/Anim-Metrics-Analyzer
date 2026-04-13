@@ -48,7 +48,7 @@ def _load_and_clean(csv_path: str, threshold: int, positions: list = None, playe
     # Filter by player ID or position
     if player_id is not None:
         before = len(df)
-        df = df[df["playerID"].astype(str) == str(player_id)]
+        df = df[pd.to_numeric(df["playerID"], errors="coerce") == player_id]
         filtered = before - len(df)
         if filtered:
             log_fn(f"Filtered to playerID {player_id}, removed {filtered} rows.")

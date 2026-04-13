@@ -35,7 +35,7 @@ def load_and_clean(df_full: pd.DataFrame, threshold: int, positions: list = None
     # Filter by player ID or position
     if player_id is not None:
         before = len(df)
-        df = df[df["playerID"].astype(str) == str(player_id)]
+        df = df[pd.to_numeric(df["playerID"], errors="coerce") == player_id]
         if len(df) < before:
             logs.append(f"Filtered to playerID {player_id}, removed {before - len(df)} rows.")
         if df.empty:
