@@ -1,8 +1,13 @@
 import io
+import os
+import re
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import html as html_mod
+
+LATEST_BUILD_BASE = r"\\eac.ad.ea.com\sports\drebuilds\fcgp\archive\production\ci\tests\autosmoke\animmetrics\fifa\gp\ml\aitestbed"
 
 REQUIRED_COLUMNS = ["playerID", "sequence", "gameTick"]
 
@@ -325,16 +330,62 @@ def main():
     # --- Sidebar: Upload & Filters ---
     with st.sidebar:
         st.header("Input")
-        uploaded_files = st.file_uploader("Upload CSV(s)", type=["csv"], accept_multiple_files=True)
+        col_upload, col_latest = st.columns([3, 2])
+        with col_upload:
+            uploaded_files = st.file_uploader("Upload CSV(s)", type=["csv"], accept_multiple_files=True)
+        with col_latest:
+            st.markdown("<br>", unsafe_allow_html=True)
+            import_latest = st.button("Import Latest Build")
 
-        if not uploaded_files:
-            st.info("Upload one or more CSV files to begin.")
+        # Handle Import Latest Build
+        if import_latest:
+            try:
+                base = Path(LATEST_BUILD_BASE)
+                if not base.exists():
+                    st.error(f"Network path not accessible: {LATEST_BUILD_BASE}")
+                    st.stop()
+                # Find all Build-### folders
+                build_dirs = [d for d in base.iterdir() if d.is_dir() and re.fullmatch(r"Build-\d{3}", d.name)]
+                if not build_dirs:
+                    st.error("No Build-### folders found.")
+                    st.stop()
+                # Pick the highest build number
+                latest_build = max(build_dirs, key=lambda d: int(d.name.split("-")[1]))
+                # Recursively find stat_logs subfolder
+                csv_path = None
+                for root, dirs, files in os.walk(latest_build):
+                    if Path(root).name == "stat_logs":
+                        for f in files:
+                            if f.startswith("anim_metrics_") and f.endswith(".csv"):
+                                csv_path = Path(root) / f
+                                break
+                    if csv_path:
+                        break
+                if csv_path is None:
+                    st.error(f"No anim_metrics_*.csv found in stat_logs under {latest_build.name}")
+                    st.stop()
+                st.session_state["latest_build_csv"] = {
+                    "name": csv_path.name,
+                    "data": pd.read_csv(csv_path),
+                    "build": latest_build.name,
+                }
+                st.success(f"Loaded {csv_path.name} from {latest_build.name}")
+            except Exception as e:
+                st.error(f"Import failed: {e}")
+
+        if not uploaded_files and "latest_build_csv" not in st.session_state:
+            st.info("Upload one or more CSV files to begin, or click **Import Latest Build**.")
             st.stop()
 
         # Read all uploaded files
         csv_data = {}
         for f in uploaded_files:
             csv_data[f.name] = pd.read_csv(f)
+
+        # Include latest build CSV if loaded
+        if "latest_build_csv" in st.session_state:
+            info = st.session_state["latest_build_csv"]
+            csv_data[info["name"]] = info["data"]
 
         file_names = list(csv_data.keys())
 
