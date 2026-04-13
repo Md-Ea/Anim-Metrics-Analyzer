@@ -1,13 +1,12 @@
 import io
 import os
 import re
-from pathlib import Path
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import html as html_mod
 
-LATEST_BUILD_BASE = r"\\eac.ad.ea.com\sports\drebuilds\fcgp\archive\production\ci\tests\autosmoke\animmetrics\fifa\gp\ml\aitestbed"
+LATEST_BUILD_BASE_DEFAULT = r"\\eac.ad.ea.com\sports\drebuilds\fcgp\archive\production\ci\tests\autosmoke\animmetrics\fifa\gp\ml\aitestbed"
 
 REQUIRED_COLUMNS = ["playerID", "sequence", "gameTick"]
 
@@ -340,36 +339,40 @@ def main():
         # Handle Import Latest Build
         if import_latest:
             try:
-                base = Path(LATEST_BUILD_BASE)
-                if not base.exists():
-                    st.error(f"Network path not accessible: {LATEST_BUILD_BASE}")
+                base = LATEST_BUILD_BASE_DEFAULT
+                if not os.path.isdir(base):
+                    st.error("Network path not accessible (check VPN / credentials):")
+                    st.code(base)
                     st.stop()
-                # Find all Build-### folders
-                build_dirs = [d for d in base.iterdir() if d.is_dir() and re.fullmatch(r"Build-\d{3}", d.name)]
+                # Find all Build-N folders
+                build_dirs = [d for d in os.listdir(base)
+                              if os.path.isdir(os.path.join(base, d)) and re.fullmatch(r"Build-\d+", d)]
                 if not build_dirs:
                     st.error("No Build-### folders found.")
                     st.stop()
                 # Pick the highest build number
-                latest_build = max(build_dirs, key=lambda d: int(d.name.split("-")[1]))
+                latest_name = max(build_dirs, key=lambda d: int(d.split("-")[1]))
+                latest_build = os.path.join(base, latest_name)
                 # Recursively find stat_logs subfolder
                 csv_path = None
                 for root, dirs, files in os.walk(latest_build):
-                    if Path(root).name == "stat_logs":
+                    if os.path.basename(root) == "stat_logs":
                         for f in files:
                             if f.startswith("anim_metrics_") and f.endswith(".csv"):
-                                csv_path = Path(root) / f
+                                csv_path = os.path.join(root, f)
                                 break
                     if csv_path:
                         break
                 if csv_path is None:
-                    st.error(f"No anim_metrics_*.csv found in stat_logs under {latest_build.name}")
+                    st.error(f"No anim_metrics_*.csv found in stat_logs under {latest_name}")
                     st.stop()
+                csv_filename = os.path.basename(csv_path)
                 st.session_state["latest_build_csv"] = {
-                    "name": csv_path.name,
+                    "name": csv_filename,
                     "data": pd.read_csv(csv_path),
-                    "build": latest_build.name,
+                    "build": latest_name,
                 }
-                st.success(f"Loaded {csv_path.name} from {latest_build.name}")
+                st.success(f"Loaded {csv_filename} from {latest_name}")
             except Exception as e:
                 st.error(f"Import failed: {e}")
 
